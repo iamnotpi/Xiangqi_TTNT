@@ -1,5 +1,8 @@
 import pygame
 import os
+import random
+
+import AI
 
 # Initialize pygame
 pygame.init()
@@ -162,19 +165,23 @@ class Piece:
                             piece = board.get_piece_at((new_x, new_y))
                             if piece is None or piece.color != self.color:
                                 moves.append((new_x, new_y))
-        # Filter out moves that would put the general in check
+
         return moves
 
 class Board:
-    def __init__(self):
+    def __init__(self, player_color=RED, vs_AI=True, AI_mode="random"):
         self.pieces = []
         self.setup_pieces()
         self.selected_piece = None
         self.current_player = RED
+        self.player_color = player_color
+        AI_color = RED if player_color == BLACK else BLACK
+        self.AI = AI.RandomEngine(color=AI_color) if vs_AI else None
         self.valid_moves = []
         self.game_over = False
         self.winner = None
         self.is_stalemate = False
+        self.last_move = None
 
     def setup_pieces(self):
         # Red pieces
@@ -248,6 +255,10 @@ class Board:
             text_rect = text.get_rect(center=(WINDOW_SIZE[0] // 2, WINDOW_SIZE[1] - 30))
             screen.blit(text, text_rect)
 
+        if self.last_move:
+            x, y = self.get_screen_position(self.last_move)
+            pygame.draw.circle(screen, (0, 255, 255), (x, y), 10)
+
     def get_piece_at(self, position):
         for piece in self.pieces:
             if piece.position == position:
@@ -262,6 +273,41 @@ class Board:
     def get_screen_position(self, board_pos):
         return (board_pos[0] * SQUARE_SIZE + BOARD_OFFSET_X,
                 board_pos[1] * SQUARE_SIZE + BOARD_OFFSET_Y)
+    
+    def handle_ai_move(self):
+        if self.AI is None or self.game_over:
+            return
+
+        if self.current_player != self.AI.color:
+            return
+
+        ai_pieces = [p for p in self.pieces if p.color == self.AI.color]
+        all_moves = []
+        for piece in ai_pieces:
+            moves = self.get_valid_moves(piece)
+            all_moves.extend([(piece, move) for move in moves])
+
+        if not all_moves:
+            self.game_over = True
+            self.winner = RED if self.AI.color == BLACK else BLACK
+            return
+
+        # Choose a random move from all valid moves
+        selected_piece, selected_move = random.choice(all_moves)
+
+        # Make the move
+        self.move_piece(selected_piece, selected_move)
+
+        # Switch the current player
+        self.current_player = RED if self.current_player == BLACK else BLACK
+
+        # Check for game over conditions
+        if self.is_checkmate():
+            self.game_over = True
+            self.winner = self.AI.side
+        elif self.check_stalemate():
+            self.game_over = True
+            self.is_stalemate = True
 
     def handle_click(self, pos):
         if self.game_over:
@@ -277,12 +323,17 @@ class Board:
                 self.valid_moves = []
                 self.current_player = RED if self.current_player == BLACK else BLACK
 
+                # Check for game over conditions
                 if self.is_checkmate():
                     self.game_over = True
                     self.winner = RED if self.current_player == BLACK else BLACK
                 elif self.check_stalemate():
                     self.game_over = True
                     self.is_stalemate = True
+                
+                # Handle AI move if it's AI's turn
+                if not self.game_over and self.AI is not None:
+                    self.handle_ai_move()
             elif clicked_piece and clicked_piece.color == self.current_player:
                 self.selected_piece = clicked_piece
                 self.valid_moves = self.get_valid_moves(clicked_piece)
@@ -293,10 +344,11 @@ class Board:
             self.selected_piece = clicked_piece
             self.valid_moves = self.get_valid_moves(clicked_piece)
 
-    def move_piece(self, piece, new_position):
+    def move_piece(self, piece: Piece, new_position: tuple):
         captured_piece = self.get_piece_at(new_position)
         if captured_piece:
             self.pieces.remove(captured_piece)
+        self.last_move = piece.position
         piece.position = new_position
 
     def get_valid_moves(self, piece):
